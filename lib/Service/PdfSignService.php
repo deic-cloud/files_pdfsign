@@ -38,15 +38,30 @@ class PdfSignService {
 	}
 
 	/**
-	 * The URL the POD should pull the user's files/key/cert from. The request is
-	 * always served BY the user's home silo — files_sharding redirects the user
-	 * there before this controller runs — so that URL is simply this node's own,
-	 * no lookup needed. (getUserServer() reads the master-authoritative
-	 * user_servers table and returns null on a silo for its own users anyway.)
-	 * The pod reaches it on the user-pod network, keeping its source IP on
-	 * uservlannet, where getkey is allowed.
+	 * The INTERNAL URL the pod must pull the user's files/key/cert from — this
+	 * silo (the user's home server: the request is already redirected here) on
+	 * its user-pod-VLAN address.
+	 *
+	 * It cannot be the public overwrite.cli.url: getting a user's X.509 key or an
+	 * impersonated file over the Internet is refused by design (the IP trust only
+	 * fires on the pod VLAN). Pods are also isolated from the infra net (10.0.),
+	 * so the pod can only reach us on our uservlannet (e.g. 10.2.) address. That
+	 * address is the trusted_domains entry whose IP is on uservlannet — there is
+	 * no files_sharding accessor for it (the old system inferred it via a master
+	 * lookup on oc_files_sharding_servers). Falls back to the public URL only if
+	 * no VLAN address is configured.
 	 */
 	private function homeServerUrl(): string {
+		$net = trim((string)$this->config->getSystemValue('uservlannet', ''));
+		if ($net !== '') {
+			$proto = (string)$this->config->getSystemValue('overwriteprotocol', 'https');
+			foreach ((array)$this->config->getSystemValue('trusted_domains', []) as $domain) {
+				$domain = trim((string)$domain);
+				if ($domain !== '' && str_starts_with($domain, $net)) {
+					return $proto . '://' . $domain;
+				}
+			}
+		}
 		return rtrim((string)$this->config->getSystemValue('overwrite.cli.url', ''), '/');
 	}
 
