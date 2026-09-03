@@ -4,10 +4,8 @@ declare(strict_types=1);
 
 namespace OCA\FilesPdfSign\Service;
 
-use OCP\Files\File;
 use OCP\Files\IRootFolder;
 use OCP\IConfig;
-use Psr\Log\LoggerInterface;
 
 /**
  * Talks to the stateless pdf_sign service pod (open-pdf-sign / PAdES-LTV).
@@ -28,7 +26,6 @@ class PdfSignService {
 	public function __construct(
 		private IConfig         $config,
 		private IRootFolder     $rootFolder,
-		private LoggerInterface $logger,
 	) {
 	}
 
@@ -41,26 +38,15 @@ class PdfSignService {
 	}
 
 	/**
-	 * The URL the POD should pull the user's files/key/cert from — the home
-	 * silo, reachable on the user-pod network so the pod's source IP stays on
-	 * uservlannet (getkey is restricted to it). Prefer the internal URL, fall
-	 * back to the public one.
+	 * The URL the POD should pull the user's files/key/cert from. The request is
+	 * always served BY the user's home silo — files_sharding redirects the user
+	 * there before this controller runs — so that URL is simply this node's own,
+	 * no lookup needed. (getUserServer() reads the master-authoritative
+	 * user_servers table and returns null on a silo for its own users anyway.)
+	 * The pod reaches it on the user-pod network, keeping its source IP on
+	 * uservlannet, where getkey is allowed.
 	 */
-	private function homeServerUrl(string $uid): string {
-		if (!class_exists(\OCA\FilesSharding\Service\ShardingService::class)) {
-			// standalone install: this node is the home server
-			return rtrim((string)$this->config->getSystemValue('overwrite.cli.url', ''), '/');
-		}
-		try {
-			$sharding = \OCP\Server::get(\OCA\FilesSharding\Service\ShardingService::class);
-			$server = $sharding->getUserServer($uid);
-			if ($server !== null) {
-				$url = $server->getInternalUrl() ?: $server->getUrl();
-				return rtrim($url, '/');
-			}
-		} catch (\Throwable $e) {
-			$this->logger->warning('files_pdfsign: homeServerUrl: ' . $e->getMessage());
-		}
+	private function homeServerUrl(): string {
 		return rtrim((string)$this->config->getSystemValue('overwrite.cli.url', ''), '/');
 	}
 
@@ -73,7 +59,7 @@ class PdfSignService {
 		$q = http_build_query([
 			'action'          => $action,
 			'user'            => $uid,
-			'user_server_url' => $this->homeServerUrl($uid),
+			'user_server_url' => $this->homeServerUrl(),
 			'dir'             => $dir,
 			'filename'        => $filename,
 		]);
