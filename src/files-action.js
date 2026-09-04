@@ -5,6 +5,8 @@
  * pdf_sign service pod. Only shown on .pdf files.
  */
 import { registerFileAction } from '@nextcloud/files'
+import { getClient, getDefaultPropfind, resultToNode, defaultRootPath } from '@nextcloud/files/dav'
+import { emit } from '@nextcloud/event-bus'
 import { translate as t } from '@nextcloud/l10n'
 import { showError, showSuccess, showInfo } from './toast'
 import { openVerifyDialog } from './dialog'
@@ -49,10 +51,18 @@ async function signOne(node) {
 		const d = r?.ocs?.data || {}
 		if (r?.ocs?.meta?.statuscode === 200 && d.path) {
 			showSuccess(t('files_pdfsign', 'Signed → {name}', { name: d.path.split('/').pop() }))
-			// refresh the current directory so the new .signed.pdf shows up
-			window.OCA?.Files?.Sidebar?.close?.()
-			document.querySelector('.files-list')?.dispatchEvent(new CustomEvent('files:node:updated'))
-			window.location.reload()
+			// Surface the new .signed.pdf in the current view without a reload:
+			// stat it over WebDAV and announce it on the event bus, exactly as
+			// the Files app does after an upload.
+			try {
+				const stat = await getClient().stat(`${defaultRootPath}/${d.path}`, {
+					details: true,
+					data: getDefaultPropfind(),
+				})
+				emit('files:node:created', resultToNode(stat.data))
+			} catch (e) {
+				window.location.reload() // fallback: at least show the file
+			}
 		} else {
 			showError(t('files_pdfsign', 'Signing failed') + ': ' + (d.message || 'unknown error'))
 		}
