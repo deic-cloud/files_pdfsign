@@ -88,7 +88,7 @@ async function verifyOne(node) {
 registerFileAction({
 	id: 'files-pdfsign-sign',
 	displayName: () => t('files_pdfsign', 'Sign PDF'),
-	title: () => t('files_pdfsign', 'Digitally sign this PDF with your ScienceData certificate'),
+	title: () => t('files_pdfsign', 'Digitally sign this PDF with your personal certificate'),
 	iconSvgInline: () => SIGN_ICON,
 	enabled: ({ nodes }) => Array.isArray(nodes) && nodes.length === 1 && isPdf(nodes[0]),
 	exec: async ({ nodes }) => { await signOne(nodes[0]); return null },
