@@ -38,6 +38,23 @@ class PdfSignService {
 	}
 
 	/**
+	 * The timestamp authority this deployment uses, from the `timestamp_authority`
+	 * block in the config file — the same block the Notes app reads, kept
+	 * app-neutral precisely so a second consumer could use it.
+	 *
+	 * Signing asks for a timestamp whenever there is an authority to ask. A
+	 * signature without one is only as good as the signer's certificate is at the
+	 * moment somebody checks it; with one, the time it was made is attested by a
+	 * third party. There is no reason to make a user choose, and no reason to ask
+	 * when no authority is configured — the signing service ignores the parameter
+	 * unless its own TSA_URL is set anyway.
+	 */
+	private function wantsTimestamp(): bool {
+		$block = $this->config->getSystemValue('timestamp_authority', []);
+		return is_array($block) && trim((string)($block['url'] ?? '')) !== '';
+	}
+
+	/**
 	 * The INTERNAL URL the pod must pull the user's files/key/cert from — this
 	 * silo (the user's home server: the request is already redirected here) on
 	 * its user-pod-VLAN address.
@@ -71,13 +88,17 @@ class PdfSignService {
 		if ($api === '') {
 			throw new \RuntimeException('PDF signing service is not configured (pdfsign_api_url).');
 		}
-		$q = http_build_query([
+		$params = [
 			'action'          => $action,
 			'user'            => $uid,
 			'user_server_url' => $this->homeServerUrl(),
 			'dir'             => $dir,
 			'filename'        => $filename,
-		]);
+		];
+		if ($action === 'sign' && $this->wantsTimestamp()) {
+			$params['ts'] = '1';
+		}
+		$q = http_build_query($params);
 		$ch = curl_init($api . '?' . $q);
 		curl_setopt_array($ch, [
 			CURLOPT_RETURNTRANSFER => true,
