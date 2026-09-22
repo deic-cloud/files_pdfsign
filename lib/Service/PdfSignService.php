@@ -24,8 +24,9 @@ use OCP\IConfig;
 class PdfSignService {
 
 	public function __construct(
-		private IConfig         $config,
-		private IRootFolder     $rootFolder,
+		private IConfig             $config,
+		private IRootFolder         $rootFolder,
+		private TimestampInspector  $inspector,
 	) {
 	}
 
@@ -151,10 +152,37 @@ class PdfSignService {
 		[$dir, $filename] = $this->splitPath($path);
 		[$code, $body] = $this->callPod($uid, 'verify', $dir, $filename);
 		$json = json_decode($body, true);
-		if (is_array($json) && ($json['status'] ?? '') === 'success') {
-			return (string)($json['data']['info'] ?? '');
+		if (!is_array($json) || ($json['status'] ?? '') !== 'success') {
+			throw new \RuntimeException($this->extractError($body) ?: 'Verification failed (HTTP ' . $code . ').');
 		}
-		throw new \RuntimeException($this->extractError($body) ?: 'Verification failed (HTTP ' . $code . ').');
+		$info = (string)($json['data']['info'] ?? '');
+
+		// What the signing service reports is what pdfsig sees: the signature, the
+		// certificate, and a "Signing time" that is the signer's own clock. It says
+		// nothing about the trusted timestamp, which is the part that still means
+		// something once the signer's certificate has expired. So add it.
+		$timestamps = $this->describeTimestamps($uid, $path);
+		if ($timestamps !== []) {
+			$info = rtrim($info) . "\n\nTrusted timestamp\n" . implode("\n", $timestamps);
+		}
+		return $info;
+	}
+
+	/**
+	 * @return list<string>
+	 */
+	private function describeTimestamps(string $uid, string $path): array {
+		try {
+			$node = $this->rootFolder->getUserFolder($uid)->get(ltrim($path, '/'));
+			if (!($node instanceof \OCP\Files\File)) {
+				return [];
+			}
+			return $this->inspector->describe($node->getContent());
+		} catch (\Throwable $e) {
+			// Never let this break verification: the pod's own answer is the part
+			// the user asked for.
+			return [];
+		}
 	}
 
 	/** @return array{0:string,1:string} [dir, filename] */
